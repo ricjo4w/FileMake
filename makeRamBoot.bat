@@ -1,20 +1,23 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-:: CONFIG
-set "BOOT=G:"                          :: FAT32 partition (boot files/BCD)
-set "DATA=H:"                          :: NTFS partition (big WIM lives here)
-set "WIM=\sources\WinIRCollector.wim"  :: Path to WIM on NTFS partition
-set "DESC=Windows RAMOS"
+:: ===== CONFIG =====
+set "BOOT=H:"                                :: FAT32 (boot files)
+set "DATA=G:"                                :: NTFS (WIM lives here)  -- only used for sanity check
+set "WIM=\sources\SmallRAM.wim"              :: path to WIM on the NTFS partition
+set "DESC=SmallRAM"
+:: Use NT native path, NOT \\?\  (no trailing backslash!)
+set "VOLGUID=\??\Volume{04695db3-890e-11f0-a428-bdff3da90986}"
 
+:: ===== DERIVED =====
 set "BCD=%BOOT%\boot\bcd"
 set "SDI=\boot\boot.sdi"
 
-echo === Rebuilding BCD on %BOOT% (FAT32) to load WIM from %DATA% (NTFS) ===
+echo === Rebuilding BCD on %BOOT% (FAT32) to load WIM from Volume %VOLGUID% ===
 
-:: Sanity checks
+:: --- Sanity checks ---
 if not exist "%BOOT%\bootmgr" (
-  echo ERROR: %BOOT%\bootmgr not found. Copy boot files from Windows ISO.
+  echo ERROR: %BOOT%\bootmgr not found. Copy boot files from Windows x64 ISO.
   exit /b 1
 )
 if not exist "%BOOT%%SDI%" (
@@ -26,49 +29,47 @@ if not exist "%DATA%%WIM%" (
   exit /b 1
 )
 
-:: Backup existing BCD
+:: --- Backup existing BCD and start fresh ---
 if exist "%BCD%" (
   copy /y "%BCD%" "%BCD%.bak" >nul
-  del /f /q "%BCD%"
+  del /f /q "%BCD%" >nul 2>&1
 )
 
-:: Create empty store
+echo Creating empty BCD store...
 bcdedit /createstore "%BCD%" || (echo ERROR: createstore failed & exit /b 1)
 
-:: Create boot manager
-bcdedit /store "%BCD%" /create {bootmgr} /d "Windows Boot Manager"
-bcdedit /store "%BCD%" /set {bootmgr} device boot
-bcdedit /store "%BCD%" /set {bootmgr} timeout 5
-bcdedit /store "%BCD%" /set {bootmgr} displaybootmenu yes
+echo Configuring {bootmgr}...
+bcdedit /store "%BCD%" /create {bootmgr} /d "Windows Boot Manager" >nul || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set {bootmgr} device boot || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set {bootmgr} timeout 5  || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set {bootmgr} displaybootmenu yes || (echo ERROR & exit /b 1)
 
-:: Ramdisk options
-bcdedit /store "%BCD%" /create {ramdiskoptions} /d "Ramdisk Options"
-bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdidevice boot
-bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdipath \boot\boot.sdi
+echo Creating {ramdiskoptions}...
+bcdedit /store "%BCD%" /create {ramdiskoptions} /d "Ramdisk Options" >nul || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdidevice boot || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdipath \boot\boot.sdi || (echo ERROR & exit /b 1)
 
-:: Create loader entry
+echo Creating Windows loader entry...
 for /f "usebackq tokens=2 delims={}" %%G in (`
   bcdedit /store "%BCD%" /create /d "%DESC%" /application osloader
 `) do set "GUID={%%G}"
+if not defined GUID (echo ERROR: Could not create loader entry & exit /b 1)
 
-if not defined GUID (
-  echo ERROR: Could not create loader entry
-  exit /b 1
-)
+:: === KEY FIX: use NT path form \??\Volume{GUID} with NO trailing backslash inside [] ===
+set "RAMDISK_SPEC=ramdisk=[%VOLGUID%]%WIM%,{ramdiskoptions}"
 
-:: Point to WIM on NTFS partition
-bcdedit /store "%BCD%" /set %GUID% device   ramdisk=[%DATA%]%WIM%,{ramdiskoptions}
-bcdedit /store "%BCD%" /set %GUID% osdevice ramdisk=[%DATA%]%WIM%,{ramdiskoptions}
-bcdedit /store "%BCD%" /set %GUID% path \Windows\System32\winload.exe
-bcdedit /store "%BCD%" /set %GUID% systemroot \Windows
-bcdedit /store "%BCD%" /set %GUID% detecthal Yes
+echo Configuring loader %GUID% ...
+bcdedit /store "%BCD%" /set %GUID% device   "%RAMDISK_SPEC%" || (echo ERROR setting device & exit /b 1)
+bcdedit /store "%BCD%" /set %GUID% osdevice "%RAMDISK_SPEC%" || (echo ERROR setting osdevice & exit /b 1)
+bcdedit /store "%BCD%" /set %GUID% path \Windows\System32\winload.exe || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set %GUID% systemroot \Windows || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /set %GUID% detecthal Yes || (echo ERROR & exit /b 1)
 
-:: Add to boot menu
-bcdedit /store "%BCD%" /displayorder %GUID% /addlast
-bcdedit /store "%BCD%" /default %GUID%
+bcdedit /store "%BCD%" /displayorder %GUID% /addlast || (echo ERROR & exit /b 1)
+bcdedit /store "%BCD%" /default %GUID% || (echo ERROR & exit /b 1)
 
 echo.
-echo === BCD setup complete. Verify with: bcdedit /store %BCD% /enum all ===
+echo === BCD setup complete. Verify with: bcdedit /store "%BCD%" /enum all ===
 echo.
 pause
 endlocal
