@@ -1,89 +1,74 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-:: =======================
-:: CONFIGURE THESE TWO LINES
-:: =======================
-set "USB=U:"                       :: <-- your USB root
-set "WIM=\sources\FullWin.wim"     :: <-- your WIM path on the USB
+:: CONFIG
+set "BOOT=G:"                          :: FAT32 partition (boot files/BCD)
+set "DATA=H:"                          :: NTFS partition (big WIM lives here)
+set "WIM=\sources\WinIRCollector.wim"  :: Path to WIM on NTFS partition
+set "DESC=Windows RAMOS"
 
-:: =======================
-:: Do not edit below
-:: =======================
-set "BCD=%USB%\boot\bcd"
+set "BCD=%BOOT%\boot\bcd"
 set "SDI=\boot\boot.sdi"
-set "DESC=Windows RAM (WIM)"
 
-echo === BIOS BCD (re)build for RAM-boot ===
-echo USB root : %USB%
-echo WIM path : %WIM%
-echo BCD path : %BCD%
-echo.
+echo === Rebuilding BCD on %BOOT% (FAT32) to load WIM from %DATA% (NTFS) ===
 
-:: --- Sanity checks ---
-if not exist "%USB%\bootmgr" (
-  echo ERROR: %USB%\bootmgr not found. Copy it from the Windows ISO.
+:: Sanity checks
+if not exist "%BOOT%\bootmgr" (
+  echo ERROR: %BOOT%\bootmgr not found. Copy boot files from Windows ISO.
   exit /b 1
 )
-if not exist "%USB%%SDI%" (
-  echo ERROR: %USB%%SDI% not found. Copy the entire \boot folder from the Windows ISO.
+if not exist "%BOOT%%SDI%" (
+  echo ERROR: %BOOT%%SDI% not found. Ensure boot.sdi is present.
   exit /b 1
 )
-if not exist "%USB%%WIM%" (
-  echo ERROR: %USB%%WIM% not found. Put your WIM at that path.
+if not exist "%DATA%%WIM%" (
+  echo ERROR: %DATA%%WIM% not found. Place your custom WIM there.
   exit /b 1
 )
 
-:: --- Ensure \boot exists ---
-if not exist "%USB%\boot" mkdir "%USB%\boot"
-
-:: --- Backup any existing BCD and start fresh ---
+:: Backup existing BCD
 if exist "%BCD%" (
-  echo Backing up existing BCD to %USB%\boot\bcd.bak ...
-  copy /y "%BCD%" "%USB%\boot\bcd.bak" >nul
-  del /f /q "%BCD%" >nul 2>&1
+  copy /y "%BCD%" "%BCD%.bak" >nul
+  del /f /q "%BCD%"
 )
 
-echo Creating empty BCD store...
+:: Create empty store
 bcdedit /createstore "%BCD%" || (echo ERROR: createstore failed & exit /b 1)
 
-echo Configuring {bootmgr}...
-bcdedit /store "%BCD%" /create {bootmgr} /d "Windows Boot Manager" >nul || (echo ERROR: create bootmgr failed & exit /b 1)
-bcdedit /store "%BCD%" /set {bootmgr} device boot || (echo ERROR: set bootmgr device failed & exit /b 1)
-bcdedit /store "%BCD%" /set {bootmgr} timeout 5  || (echo ERROR: set timeout failed & exit /b 1)
-bcdedit /store "%BCD%" /set {bootmgr} displaybootmenu yes || (echo ERROR: set displaybootmenu failed & exit /b 1)
+:: Create boot manager
+bcdedit /store "%BCD%" /create {bootmgr} /d "Windows Boot Manager"
+bcdedit /store "%BCD%" /set {bootmgr} device boot
+bcdedit /store "%BCD%" /set {bootmgr} timeout 5
+bcdedit /store "%BCD%" /set {bootmgr} displaybootmenu yes
 
-echo Creating {ramdiskoptions}...
-bcdedit /store "%BCD%" /create {ramdiskoptions} /d "Ramdisk Options" >nul || (echo ERROR: create ramdiskoptions failed & exit /b 1)
-:: **** KEY CHANGE HERE ****
-bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdidevice boot || (echo ERROR: set ramdisksdidevice failed & exit /b 1)
-bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdipath \boot\boot.sdi || (echo ERROR: set ramdisksdipath failed & exit /b 1)
+:: Ramdisk options
+bcdedit /store "%BCD%" /create {ramdiskoptions} /d "Ramdisk Options"
+bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdidevice boot
+bcdedit /store "%BCD%" /set {ramdiskoptions} ramdisksdipath \boot\boot.sdi
 
-echo Creating Windows loader entry...
+:: Create loader entry
 for /f "usebackq tokens=2 delims={}" %%G in (`
   bcdedit /store "%BCD%" /create /d "%DESC%" /application osloader
 `) do set "GUID={%%G}"
 
 if not defined GUID (
-  echo ERROR: Could not capture loader GUID.
+  echo ERROR: Could not create loader entry
   exit /b 1
 )
 
-echo Configuring loader %GUID% ...
-bcdedit /store "%BCD%" /set %GUID% device   ramdisk=[boot]%WIM%,{ramdiskoptions} || (echo ERROR: set device failed & exit /b 1)
-bcdedit /store "%BCD%" /set %GUID% osdevice ramdisk=[boot]%WIM%,{ramdiskoptions} || (echo ERROR: set osdevice failed & exit /b 1)
-bcdedit /store "%BCD%" /set %GUID% path \Windows\System32\winload.exe         || (echo ERROR: set path failed & exit /b 1)
-bcdedit /store "%BCD%" /set %GUID% systemroot \Windows                        || (echo ERROR: set systemroot failed & exit /b 1)
-bcdedit /store "%BCD%" /set %GUID% detecthal Yes                              || (echo ERROR: set detecthal failed & exit /b 1)
+:: Point to WIM on NTFS partition
+bcdedit /store "%BCD%" /set %GUID% device   ramdisk=[%DATA%]%WIM%,{ramdiskoptions}
+bcdedit /store "%BCD%" /set %GUID% osdevice ramdisk=[%DATA%]%WIM%,{ramdiskoptions}
+bcdedit /store "%BCD%" /set %GUID% path \Windows\System32\winload.exe
+bcdedit /store "%BCD%" /set %GUID% systemroot \Windows
+bcdedit /store "%BCD%" /set %GUID% detecthal Yes
 
-echo Adding loader to boot menu...
-bcdedit /store "%BCD%" /displayorder %GUID% /addlast || (echo ERROR: displayorder failed & exit /b 1)
-bcdedit /store "%BCD%" /default %GUID%               || (echo ERROR: default failed & exit /b 1)
-
-echo.
-echo Done. Verifying store:
-bcdedit /store "%BCD%" /enum all
+:: Add to boot menu
+bcdedit /store "%BCD%" /displayorder %GUID% /addlast
+bcdedit /store "%BCD%" /default %GUID%
 
 echo.
-echo SUCCESS. Boot this USB in LEGACY BIOS/CSM mode.
+echo === BCD setup complete. Verify with: bcdedit /store %BCD% /enum all ===
+echo.
+pause
 endlocal
