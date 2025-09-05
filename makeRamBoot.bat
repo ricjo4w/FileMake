@@ -2,12 +2,12 @@
 setlocal
 
 REM ====== EDIT THESE TWO ======
-set "BOOT=G:"                     REM FAT32 boot partition (has \boot, \EFI, bootmgr/bootmgr.efi)
+set "BOOT=H:"                     REM FAT32 boot partition (has \boot, \efi, bootmgr, bootmgr.efi)
 set "WIM=\sources\SmallRAM.wim"   REM Relative path of your WIM on the NTFS partition
 
 REM ====== Derived ======
 set "BCDBIOS=%BOOT%\boot\bcd"
-set "BCDUEFI=%BOOT%\EFI\Microsoft\Boot\BCD"
+set "BCDUEFI=%BOOT%\efi\microsoft\boot\bcd"
 
 echo.
 echo === Rebuilding BCD(s) using [locate] ===
@@ -49,8 +49,8 @@ bcdedit /store "%BCDBIOS%" /default %GUID%
 echo BIOS store done.
 bcdedit /store "%BCDBIOS%" /enum {default}
 
-REM ===== UEFI store (\EFI\Microsoft\Boot\BCD) — only if folder exists =====
-if exist "%BOOT%\EFI\Microsoft\Boot" (
+REM ===== UEFI store (\efi\microsoft\boot\bcd) — only if folder exists =====
+if exist "%BOOT%\efi\microsoft\boot" (
   echo.
   echo --- UEFI store: %BCDUEFI% ---
   if exist "%BCDUEFI%" del /f /q "%BCDUEFI%" >nul 2>&1
@@ -80,7 +80,7 @@ if exist "%BOOT%\EFI\Microsoft\Boot" (
 )
 
 echo.
-echo === Finished. Boot in BIOS (uses \boot\BCD) or UEFI (uses \EFI\Microsoft\Boot\BCD). ===
+echo === Finished. Boot in BIOS (uses \boot\BCD) or UEFI (uses \efi\microsoft\boot\bcd). ===
 echo NOTE: Because [locate] is used, ensure ONLY ONE attached disk contains %WIM%.
 echo.
 pause
