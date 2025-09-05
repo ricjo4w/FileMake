@@ -21,7 +21,7 @@ set "BOOT=H:"                     rem FAT32 EFI/BIOS system partition (holds \bo
 set "WIMREL=\sources\SmallRAM.wim" rem Relative path to the WIM ON THE NTFS DATA PARTITION
 
 rem ====== Optional: PE mode flag (Yes recommended for RAM-WIM) ======
-set "WINPE=Yes"
+set "WINPE=No"
 
 rem ====== Derived paths ======
 set "BCDBIOS=%BOOT%\boot\bcd"
